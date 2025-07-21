@@ -222,7 +222,9 @@ void loop()
             speedValue = speedValue-30000;
         }
 
-        Serial.println(constrainValue);
+        //Serial.println(constrainValue);
+
+
         if (constrainValue <= 10) {
             speedValue = constrain(speedValue, 0,   2);
             digitalWrite(stopPin, LOW);
@@ -253,25 +255,25 @@ void loop()
         }
         //speedValue/2 means lower the speed
         if ((statusSpeedValue - 10000) < 0) {
-            Serial.println(speedValue/2);
+            //Serial.println(speedValue/2);
             analogWrite(pwmOutPin, speedValue/2);
             digitalWrite(stopPin, HIGH);
             digitalWrite(turnPin, HIGH);
         } else if (((statusSpeedValue - 10000) > 0) && ((statusSpeedValue - 10000) < 10000)) {
-            Serial.print("stop: ");
-            Serial.println(speedValue/2);
+            //Serial.print("stop: ");
+            //Serial.println(speedValue/2);
             analogWrite(pwmOutPin, speedValue/2);
             digitalWrite(stopPin, LOW);
             digitalWrite(turnPin, HIGH);
         } else if (((statusSpeedValue - 20000) > 0) && ((statusSpeedValue - 20000) < 10000)) {
-            Serial.print("turn: ");
-            Serial.println(speedValue/2);
+            //Serial.print("turn: ");
+            //Serial.println(speedValue/2);
             analogWrite(pwmOutPin, speedValue/2);
             digitalWrite(stopPin, HIGH);
             digitalWrite(turnPin, LOW);
         } else if (((statusSpeedValue - 30000) > 0) && ((statusSpeedValue - 30000) < 10000)) {
-            Serial.print("stop+turn: ");
-            Serial.println(speedValue/2);
+            //Serial.print("stop+turn: ");
+            //Serial.println(speedValue/2);
             analogWrite(pwmOutPin, speedValue/2);
             digitalWrite(stopPin, LOW);
             digitalWrite(turnPin, LOW);

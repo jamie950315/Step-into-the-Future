@@ -1,280 +1,353 @@
-/*--------------------------------------------------
-todo list:
-1. read data from rshoe and lshoe   (done
-2. read data from phone             (done
-3. read data from nano(ctrl)        (done
-4. write data to phone(batt)        (done
-5. write data to nano(ctrl)         (probably don't need to do this
-6. write data to rshoe and lshoe    (done
-7. direction vibration              (done
-8. limit speed                      (done
-9. write data to driver board       (done
-10.speed indicator                  (done
-11.turn signal                      (will do this later
-12.nano battery indicator           (done
-13.phone as ctrl                    (will do this later
 
 
-
-
-
-
-             hc-06 hc-05      nrf24l01
-tx  dirc     batt  naBa       ctrl
-rx  batt     dirc  ctrl       naBa<---what is this?
-
-    phone       2560          nano
-
---------------------------------------------------*/
-
-//Q: please based on the code below, translate the name "step into the future" to chinese of this project, give 10 options, and explain why you choose this name
 
 
 #include <SPI.h>
 #include "RF24.h"
+#include <Adafruit_SSD1306.h>
+#include <splash.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
 
-RF24 rf24(7, 8); // CE腳, CSN腳
+#define SCREEN_WIDTH 128 // OLED 寬度像素
+#define SCREEN_HEIGHT 32 // OLED 高度像素
+
+
+int data;
+int prevChar = '\0';
+int stop = 0;
+int turn = 0;
+#define LED1 8
+#define LED2 9
+//#define LED3 10
+//#define LED4 11
+//#define LED5 12
+
+int processedValue = 0;
+
+bool firstTime = true;
+bool pressedStop = false;
+
+#define speedLimiterPin 2
+
+int speedLimiterStatus = 0;
+int speedLimiterStatusPrev = 0;
+
+RF24 rf24(3, 4); // CE腳, CSN腳
 
 const byte addr[] = "1Node";
-const byte pipe = 1;  // 指定通道編號
+//char msg[] = "Hello World!";
 
 
-char currChar;
-char prevChar = '\0';
-int  speedValue;
-int  pwmOutPin = 11;
-int  stopPin = 9;
-int  turnPin = 10;
-int  constrainValueR = 400;
-int  constrainValueL = 400;
-int  constrainValue  = 400;
-#define battMax 4.5839
-#define battMin 3.3137
+
+// 設定OLED
+#define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+//自訂圖形 128x32
+
+static const unsigned char PROGMEM d_sign[] =
+{ 
+	0x00, 0x00, 0x3f, 0x80, 0x3f, 0xe0, 0x39, 0xf0, 0x38, 0x38, 0x38, 0x38, 0x38, 0x18, 0x38, 0x1c, 
+	0x38, 0x1c, 0x38, 0x18, 0x38, 0x38, 0x38, 0x78, 0x3f, 0xf0, 0x3f, 0xc0, 0x00, 0x00
+
+};
+
+static const unsigned char PROGMEM r_sign[] =
+{
+	0x00, 0x00, 0x00, 0x00, 0x7f, 0xe0, 0x7f, 0xf0, 0x70, 0x70, 0x70, 0x70, 0x70, 0xf0, 0x7f, 0xe0, 
+	0x7f, 0x80, 0x71, 0xc0, 0x70, 0xe0, 0x70, 0xf0, 0x70, 0x70, 0x00, 0x00, 0x00, 0x00
+
+};
+
+static const unsigned char PROGMEM n_sign[] =
+{
+	0x00, 0x00, 0x38, 0x38, 0x38, 0x38, 0x3c, 0x38, 0x3e, 0x38, 0x3e, 0x38, 0x37, 0x38, 0x33, 0xb8, 
+	0x31, 0xf8, 0x31, 0xf8, 0x30, 0xf8, 0x30, 0x78, 0x30, 0x78, 0x30, 0x38, 0x00, 0x00
+
+};
+
+static const unsigned char PROGMEM p_sign[] =
+{
+	0x00, 0x00, 0x3f, 0xe0, 0x3f, 0xf0, 0x38, 0x78, 0x38, 0x38, 0x38, 0x38, 0x3f, 0xf8, 0x3f, 0xf0, 
+	0x38, 0x00, 0x38, 0x00, 0x38, 0x00, 0x38, 0x00, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00
+
+};
+
+static const unsigned char PROGMEM s_sign[] =
+{
+	0x00, 0x00, 0x0f, 0xc0, 0x1f, 0xe0, 0x38, 0x70, 0x38, 0x70, 0x3c, 0x00, 0x1f, 0xc0, 0x0f, 0xf0, 
+	0x00, 0xf0, 0x10, 0x38, 0x38, 0x38, 0x3c, 0x70, 0x1f, 0xf0, 0x0f, 0xc0, 0x00, 0x00
+
+};   
+
+static const unsigned char PROGMEM id_sign[] =
+{
+    0xff, 0xfe, 0xc0, 0x7e, 0xc0, 0x1e, 0xc6, 0x0e, 0xc7, 0xc6, 0xc7, 0xc6, 0xc7, 0xe6, 0xc7, 0xe2, 
+	0xc7, 0xe2, 0xc7, 0xe6, 0xc7, 0xc6, 0xc7, 0x86, 0xc0, 0x0e, 0xc0, 0x3e, 0xff, 0xfe
+};
+
+static const unsigned char PROGMEM ir_sign[] =
+{
+    0xff, 0xff, 0xff, 0xff, 0x80, 0x1f, 0x80, 0x0f, 0x8f, 0x87, 0x8f, 0xc7, 0x8f, 0x8f, 0x80, 0x0f, 
+	0x80, 0x3f, 0x8e, 0x3f, 0x8f, 0x1f, 0x8f, 0x0f, 0x8f, 0x87, 0x8f, 0xc7, 0xff, 0xff, 0xff, 0xff
+};
+
+static const unsigned char PROGMEM in_sign[] =
+{
+    0xff, 0xff, 0xc7, 0xe3, 0xc3, 0xe3, 0xc3, 0xe3, 0xc1, 0xe3, 0xc0, 0xe3, 0xc0, 0xe3, 0xc4, 0x63, 
+	0xc6, 0x23, 0xc6, 0x23, 0xc7, 0x03, 0xc7, 0x83, 0xc7, 0x83, 0xc7, 0xc3, 0xff, 0xff, 0xff, 0xff
+};
+
+static const unsigned char PROGMEM ip_sign[] =
+{
+    0xff, 0xfe, 0xc0, 0x1e, 0xc0, 0x0e, 0xc7, 0x86, 0xc7, 0xc6, 0xc7, 0xc6, 0xc0, 0x06, 0xc0, 0x0e, 
+	0xc7, 0xfe, 0xc7, 0xfe, 0xc7, 0xfe, 0xc7, 0xfe, 0xc7, 0xfe, 0xff, 0xfe, 0xff, 0xfe
+};
+
+static const unsigned char PROGMEM is_sign[] =
+{
+    0xff, 0xfe, 0xf0, 0x3e, 0xe0, 0x1e, 0xc7, 0x8e, 0xc7, 0x8e, 0xc3, 0xfe, 0xe0, 0x3e, 0xf0, 0x0e, 
+	0xff, 0x0e, 0xef, 0xc6, 0xc7, 0xc6, 0xc3, 0x8e, 0xe0, 0x0e, 0xf0, 0x3e, 0xff, 0xfe
+};
+
+
+static const unsigned char PROGMEM right_sign[] =
+{ 
+0x00,0x00,0x00,0x00
+,0x00,0x00,0x00,0x00
+,0x00,0x00,0x00,0x00
+,0x00,0x00,0x00,0x00
+,0x00,0x01,0x00,0x00
+,0x00,0x01,0x80,0x00
+,0x00,0x01,0xc0,0x00
+,0x00,0x01,0xe0,0x00
+,0x00,0x01,0xf0,0x00
+,0x0f,0xff,0xf8,0x00
+,0x0f,0xff,0xfc,0x00
+,0x0f,0xff,0xfe,0x00
+,0x0f,0xff,0xff,0x00
+,0x0f,0xff,0xff,0x80
+,0x0f,0xff,0xff,0xc0
+,0x0f,0xff,0xff,0xc0
+,0x0f,0xff,0xff,0x80
+,0x0f,0xff,0xff,0x00
+,0x0f,0xff,0xfe,0x00
+,0x0f,0xff,0xfc,0x00
+,0x0f,0xff,0xf8,0x00
+,0x00,0x01,0xf0,0x00
+,0x00,0x01,0xe0,0x00
+,0x00,0x01,0xc0,0x00
+,0x00,0x01,0x80,0x00
+,0x00,0x01,0x00,0x00
+,0x00,0x00,0x00,0x00
+,0x00,0x00,0x00,0x00
+,0x00,0x00,0x00,0x00
+,0x00,0x00,0x00,0x00  };
+
 
 
 void setup()
 {
-    Serial.begin(38400);    // connect to the serial port
-    Serial1.begin(38400);    // connect to the Lshoe
-    Serial2.begin(9600);    // connect to the phone@hc06bt2@98:D3:51:FE:16:5E
-    Serial3.begin(38400);    // connect to the Rshoe
+    pinMode(7, INPUT_PULLUP);      //stop button
+    pinMode(6, INPUT_PULLUP);      //turn button
+    pinMode(A0, INPUT);
+    Serial.begin(38400);
+    pinMode(LED1, OUTPUT);
+    pinMode(LED2, OUTPUT);
+    //pinMode(LED3, OUTPUT);
+    //pinMode(LED4, OUTPUT);
+    //pinMode(LED5, OUTPUT);
+    digitalWrite(LED1, HIGH);
+    digitalWrite(LED2, HIGH);
+    //digitalWrite(LED3, HIGH);
+    //digitalWrite(LED4, HIGH);
+    //digitalWrite(LED5, LOW);
+    pinMode(speedLimiterPin, INPUT_PULLUP);
 
-    //setup pwm 2kHz
-    TCCR1A = 0b00000011; // 10bit
-    TCCR1B = 0b00001010; // x8 fast pwm
+    rf24.begin();
+    rf24.setChannel(100);       // 設定頻道編號
+    rf24.openWritingPipe(addr); // 設定通道位址
+    //rf24.setPALevel(RF24_PA_MIN);   // 設定廣播功率
+     //rf24.setDataRate(RF24_250KBPS); // 設定傳輸速率
+    rf24.stopListening();       // 停止偵聽；設定成發射模式
 
+    // 偵測是否安裝好OLED了
+    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // 一般1306 OLED的位址都是0x3C
+        Serial.println(F("SSD1306 allocation failed"));
+        for(;;); // Don't proceed, loop forever
+    }
 
-    rf24.begin();           // connect to the nano(ctrl) via nf24l01
-    rf24.setChannel(100);  // 設定頻道編號
-    //rf24.setPALevel(RF24_PA_MIN);
-    //rf24.setDataRate(RF24_250KBPS);
-    rf24.openReadingPipe(pipe, addr);  // 開啟通道和位址
-    rf24.startListening();  // 開始監聽無線廣播
-    Serial.println("nRF24L01 ready!");
+    // 顯示Adafruit的LOGO，算是開機畫面
+    display.display();
+    delay(500); // 停1秒
 
-    /*make pin 4 as gnd, pin 5 as vcc
-    pinMode(4, OUTPUT);
-    pinMode(5, OUTPUT);
-    digitalWrite(4, LOW);
-    digitalWrite(5, HIGH);
-    */
+    // 清除畫面
+    display.clearDisplay();
 
-    //read battery status
-    pinMode(A0, INPUT);     
+    //testdrawstyles();    // 測試文字
 
-    //setup ctrl pin
-    pinMode(pwmOutPin, OUTPUT); 
-    pinMode(stopPin, OUTPUT);
-    pinMode(turnPin, OUTPUT);
+    //testdrawbitmap();    // 顯示圖形
 
 }
 
 void loop()
 {
-    delay(10);
-
-
-
-    
-    if (Serial.available()) {
-        currChar = Serial.read();
-        if (currChar == 'l' || currChar == 'L') {
-            Serial1.write(currChar);
-            //Serial1.println();
-        }
-    }
-    
-
-    
-    //read phone data
-    if (Serial2.available())
-    {
-        currChar = Serial2.read();
-        Serial.write(currChar);
-        Serial.println();
+    if(Serial.available() > 0) {
+        data = Serial.parseInt();
         
-        /*write battery data to phone
-        if (currChar == 200){   
-            Serial2.write(120);         //120 is the start byte to phone
-            Serial2.write(map(analogRead(A0),0,1023,0,100)); //write battery data to phone
-              
-                                                     //200 is the start byte from phone
-            int volSensorValue = analogRead(A0);                            //read battery voltage
-            float battVol = (volSensorValue / 1023.0) * 5.0;                //convert to voltage
-            int battPercent = map(battVol, battMin, battMax, 0, 100);     //convert to percentage
-            battPercent = constrain(battPercent, 0, 100);                   //constrain the value to 0~100
-            
-            
-            
-        }
-        */
-        
-        //write data to rshoe if currChar is r or R
-        if (currChar == 'r' || currChar == 'R') {
-            Serial3.write(currChar);
-            Serial3.println();
-        }
-        
-
-        //write data to lshoe if currChar is l or L
-        if (currChar == 'l' || currChar == 'L') {        
-            Serial1.write(currChar);
-            Serial1.println();
-            
-        }
-
-        
-        
-        /* only print when the data is different from the previous one
-        if (currChar != prevChar) {
-            Serial.write(currChar);
-            prevChar = currChar;
-            Serial.println();
-        }
-        */
-
     }
 
+    if (digitalRead(7)== LOW) {
+        stop=10000;
+    }else if (digitalRead(7)== HIGH) {
+        stop=0;
+    }
+    if (digitalRead(6) == LOW) {
+        turn=20000;
+    }else if (digitalRead(6) == HIGH) {
+        turn=0;
+    }
+
+    int analogValue;
     
+
+
+    if (firstTime || pressedStop) {
+        if (analogRead(A0) > 0) {
+            //do nothing
+            display.drawBitmap(22, 16, s_sign, 15, 15, 1);
+            display.drawBitmap(39, 16, d_sign, 15, 15, 1);
+            //display.drawBitmap(56, 16, in_sign, 15, 15, 1);
+            display.drawBitmap(73, 16, p_sign, 15, 15, 1);
+            display.drawBitmap(90, 16, r_sign, 15, 15, 1);
+            analogValue = 0;
+        }
+        else {
+            analogValue = analogRead(A0);
+            firstTime = false;
+            pressedStop = false;
+        }
+    }
+    else {
+        analogValue = analogRead(A0);
+        display.drawBitmap(56, 16, n_sign, 15, 15, 1);
+    }
+
+    if (digitalRead(speedLimiterPin) == LOW) {
+        speedLimiterStatus = 0;
+        analogValue = map(analogValue, 1, 1023, 1, 512); 
+    }else if (digitalRead(speedLimiterPin) == HIGH) {
+        speedLimiterStatus = 1;
+        analogValue = constrain(analogValue, 1, 1023); 
+    }
+    speedLimiterStatusPrev = speedLimiterStatus;
+
+
     /*
-    //write data to phone
-    if (Serial.available()) {
-        Serial2.write(Serial.read());
-        
+    int i = 0;
+
+    if (speedLimiterStatusPrev != speedLimiterStatus) {
+        if (speedLimiterStatus == 1) {
+            //slowly change max analogValue to 1023
+            analogValue = analogRead(A0);
+            analogValue = map(analogValue, 1, 1023, 1, 512); 
+            if (analogValue < 1022) {
+                analogValue = analogValue + i;
+                i++;
+            }
+
+
+        }
+                        
+    }*/
+
+    
+    
+    
+    processedValue = analogValue + stop + turn;
+
+    
+    Serial.println(processedValue);
+    //rf24.write(&msg, sizeof(msg));  // 傳送資料
+    //Serial.println(" ");
+    delay(15);
+    //rf24 write processedValue
+    rf24.write(&processedValue, sizeof(processedValue));  // 傳送資料
+
+    display.clearDisplay();
+    display.setTextSize(2);             // 設定文字大小
+    display.setTextColor(1);        // 1:OLED預設的顏色(這個會依該OLED的顏色來決定)
+    display.setCursor(0,0);             // 設定起始座標
+    display.print(" ");
+    display.print(map(analogValue,1,1010,0,20));        // 要顯示的字串
+    //display.print(data);
+    display.print(" KM/H");
+
+    if (digitalRead(7)== LOW) {
+        display.drawBitmap(73, 16, ip_sign, 15, 15, 1);
+        pressedStop = true;
+     }else if (digitalRead(7)== HIGH || firstTime == true) {
+        display.drawBitmap(73, 16, p_sign, 15, 15, 1);
     }
+
+    if (digitalRead(6) == LOW) {
+        display.drawBitmap(90, 16, ir_sign, 15, 15, 1);
+    }else if (digitalRead(6) == HIGH || firstTime == true) {
+        display.drawBitmap(90, 16, r_sign, 15, 15, 1);
+    }
+
+    if (speedLimiterStatus == 1) {
+        if (digitalRead(7)== LOW || digitalRead(6) == LOW || firstTime == true || pressedStop == true) {
+            display.drawBitmap(22, 16, s_sign, 15, 15, 1);
+        }else{
+            display.drawBitmap(22, 16, is_sign, 15, 15, 1);
+        }
+    }else if (speedLimiterStatus == 0) {
+        display.drawBitmap(22, 16, s_sign, 15, 15, 1);
+    }
+
+    if (digitalRead(7)== LOW || digitalRead(6) == LOW || speedLimiterStatus == 1 || firstTime == true || pressedStop == true) {
+        display.drawBitmap(39, 16, d_sign, 15, 15, 1);
+    }else if (digitalRead(7)== HIGH && digitalRead(6) == HIGH && speedLimiterStatus == 0 && firstTime == false) {
+        display.drawBitmap(39, 16, id_sign, 15, 15, 1);
+    }
+
+    
+    //display.drawBitmap(22, 16, s_sign, 15, 15, 1);
+    //display.drawBitmap(56, 16, n_sign, 15, 15, 1);
+
+    if (firstTime == true || pressedStop == true) {
+        display.drawBitmap(56, 16, in_sign, 15, 15, 1);
+    }else{
+        display.drawBitmap(56, 16, n_sign, 15, 15, 1);
+    }
+
+
+
+
+
+
+        /*
+        display.drawBitmap(22, 16, s_sign, 15, 15, 1);
+        display.drawBitmap(39, 16, d_sign, 15, 15, 1);
+        display.drawBitmap(56, 16, n_sign, 15, 15, 1);
+        display.drawBitmap(73, 16, p_sign, 15, 15, 1);
+        display.drawBitmap(90, 16, r_sign, 15, 15, 1);
+        */
+    display.display();                  // 要有這行才會把文字顯示出來
+
+ 
+    /*
+    if (digitalRead(10)== LOW) {
+        hc06.println("stop");
+    }
+    if (digitalRead(11) == LOW) {
+        hc06.println("turn");
+    }
+    hc06.println(analogRead(A0));
+    delay(50);
     */
-
-
-    
-    //read Rshoe data
-    if (Serial3.available()) 
-    {
-        constrainValueR = (Serial3.parseInt());
-    }
-    
-    
-    //read Lshoe data
-    if (Serial1.available())
-    {
-        constrainValueL = (Serial1.parseInt());
-    }
-    
-    //-----------------------------------------------
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    // .        DONT FORGET TO REENABLE THIS         .
-    //constrainValue = (min(constrainValueL,constrainValueR));
-    //constrainValue = constrainValueR;
-
-
-    /*
-    if (rf24.available(&pipe)) {
-        int msg;
-        rf24.read(&msg, sizeof(msg));
-        Serial.println(msg); // 顯示訊息內容 
-    }
-*/
-    
-    //read nano data
-    if (rf24.available(&pipe))
-    {
-        //Serial.println("ok");  
-        int statusSpeedValue;
-        //int msg;   
-        rf24.read(&speedValue, sizeof(speedValue));   
-        statusSpeedValue = speedValue;
-        //0.3v ~ 4.5v = 65 ~ 930
-
-        if ((statusSpeedValue - 10000) < 0) {
-            speedValue = speedValue;
-        } else if (((statusSpeedValue - 10000) > 0) && ((statusSpeedValue - 10000) < 10000)) {
-            speedValue = speedValue-10000;
-        } else if (((statusSpeedValue - 20000) > 0) && ((statusSpeedValue - 20000) < 10000)) {
-            speedValue = speedValue-20000;          
-        } else if (((statusSpeedValue - 30000) > 0) && ((statusSpeedValue - 30000) < 10000)) {
-            speedValue = speedValue-30000;
-        }
-
-        Serial.println(constrainValue);
-        if (constrainValue <= 10) {
-            speedValue = constrain(speedValue, 0,   2);
-            digitalWrite(stopPin, LOW);
-            //digitalWrite(turnPin, LOW);
-            //analogWrite(pwmOutPin, 300);
-        } else if (constrainValue > 10 && constrainValue <= 20) {
-            speedValue = constrain(speedValue, 0, 4);
-            digitalWrite(stopPin, LOW);
-            //analogWrite(pwmOutPin, 300);
-        } else if (constrainValue > 20 && constrainValue <= 30) {
-            speedValue = constrain(speedValue, 0, 30);
-            digitalWrite(stopPin,LOW);
-        } else if (constrainValue > 30 && constrainValue <= 40) {
-            speedValue = constrain(speedValue, 0, 80);
-            digitalWrite(stopPin, HIGH);
-        } else if (constrainValue > 40 && constrainValue <= 50) {
-            speedValue = constrain(speedValue, 0, 140);
-            digitalWrite(stopPin, HIGH);
-        } else if (constrainValue > 50 && constrainValue <= 300) {
-            speedValue = constrain(speedValue, 0, 400);
-            digitalWrite(stopPin, HIGH);
-        } else if (constrainValue > 300 && constrainValue <= 355) {
-            speedValue = constrain(speedValue, 0, 500);
-            digitalWrite(stopPin, HIGH);
-        } else {
-            speedValue = constrain(speedValue, 0, 1023);
-            //digitalWrite(stopPin, HIGH);
-        }
-        //speedValue/2 means lower the speed
-        if ((statusSpeedValue - 10000) < 0) {
-            Serial.println(speedValue/2);
-            analogWrite(pwmOutPin, speedValue/2);
-            digitalWrite(stopPin, HIGH);
-            digitalWrite(turnPin, HIGH);
-        } else if (((statusSpeedValue - 10000) > 0) && ((statusSpeedValue - 10000) < 10000)) {
-            Serial.print("stop: ");
-            Serial.println(speedValue/2);
-            analogWrite(pwmOutPin, speedValue/2);
-            digitalWrite(stopPin, LOW);
-            digitalWrite(turnPin, HIGH);
-        } else if (((statusSpeedValue - 20000) > 0) && ((statusSpeedValue - 20000) < 10000)) {
-            Serial.print("turn: ");
-            Serial.println(speedValue/2);
-            analogWrite(pwmOutPin, speedValue/2);
-            digitalWrite(stopPin, HIGH);
-            digitalWrite(turnPin, LOW);
-        } else if (((statusSpeedValue - 30000) > 0) && ((statusSpeedValue - 30000) < 10000)) {
-            Serial.print("stop+turn: ");
-            Serial.println(speedValue/2);
-            analogWrite(pwmOutPin, speedValue/2);
-            digitalWrite(stopPin, LOW);
-            digitalWrite(turnPin, LOW);
-        }
-    }
 }
+
